@@ -19,6 +19,8 @@ import random
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+from graph_builder import Builder
+
 ##=============================================================================
 ##-------------------------------PARAMETERS------------------------------------
 ##=============================================================================
@@ -33,6 +35,7 @@ sampling_freq  = 10e6 ## Hz
 ##---------------------------simulation parameters-----------------------------
 
 ms_to_process        = 1
+samples_to_shift     = 4000
 skip_number_of_bytes = 4660
 dopp_freq_max        = int(5e3) ## Hz
 dopp_freq_step       = int(500) ## Hz
@@ -84,15 +87,22 @@ samples_per_ms         = int(round(sampling_freq / 1e3))
 samples_per_Rang_code_chip = int(round(sampling_freq / Rang_code_freq))
 
 samples_per_Rang_code = np.longlong(round(Rang_code_length * 
-									samples_per_Rang_code_chip)) ## num of samples per one 
+									sampling_freq / Rang_code_freq)) ## num of samples per one 
 																	 ## Ranging code chip
-samples_for_prosessing = samples_per_ms * ms_to_process
+# samples_for_prosessing = int(samples_per_ms * ms_to_process)
+
+samples_for_prosessing = int(samples_per_Rang_code)
+
 phase_points           = np.arange(samples_for_prosessing) * time_of_sample
 Ranging_code_period    = Rang_code_length / Rang_code_freq
 Ranging_code_index     = np.longlong((np.floor(np.arange(0, samples_for_prosessing) * 
 									Rang_code_freq / sampling_freq))) ## number of whole Rang_code_chips
-																		      ## per one sample															      
+																		      ## per one sample
+
+print(Ranging_code_index)															      
 Ranging_code_index = Ranging_code_index % Rang_code_length	
+print(Ranging_code_index)															      
+
 
 number_of_frq_bins = np.int(np.floor(2 * dopp_freq_max / dopp_freq_step) + 1)
 
@@ -102,9 +112,9 @@ results = np.zeros((number_of_frq_bins, samples_for_prosessing))
 ##-------------------------------FUNCTIONS-------------------------------------
 ##=============================================================================
 
-def carrier_generator():
+def carrier_generator(sigma):
 	
-	carrier = np.sin(2 * np.pi * intermediate_freq * phase_points)
+	carrier = np.sin(2 * np.pi * (intermediate_freq + random.gauss(0, sigma)) * phase_points)
 
 	return carrier
 
@@ -160,23 +170,44 @@ def navigation_message_genrator():
 def nh_code_generator():
 	pass
 
+def signal_generator():
+
+	rang_codes          = np.zeros((num_of_satellites + 1, samples_for_prosessing))
+	rang_codes_specrtum = np.zeros((num_of_satellites + 1, samples_for_prosessing), dtype = np.complex128)
+	signals             = np.zeros((num_of_satellites + 1, samples_for_prosessing))
+
+	carrier             = carrier_generator(sigma = 0)
 
 
-rang_code          = ranging_code_generator(1)
-rang_code_specrtum = np.conj(np.fft.fft(rang_code))
-carrier            = carrier_generator()
-signal             = rang_code * carrier
+	for satellit in range(1, num_of_satellites + 1): 
+		rang_codes[satellit]          = ranging_code_generator(satellit)
+		rang_codes_specrtum[satellit] = np.conj(np.fft.fft(rang_codes[satellit]))
+		signals[satellit]             = rang_codes[satellit] * carrier
 
-signal_with_noise = np.empty(len(signal))
+		signal1 = signals[satellit] [0 : samples_to_shift]
+		signal2 = signals[satellit] [samples_to_shift : ]
 
-def acquisition(satellite_num, sigma):
+		signals[satellit] = np.concatenate([signal2, signal1])
 
-	# rang_code          = ranging_code_generator(satellite_num)
-	# rang_code_specrtum = np.conj(np.fft.fft(rang_code))
-	# carrier            = carrier_generator()
-	# signal             = rang_code * carrier
 
-	# signal_with_noise = np.empty(len(signal))
+	return rang_codes, rang_codes_specrtum, carrier, signals
+
+
+
+def acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num, sigma):
+
+	rang_code = rang_codes[satellite_num]
+	rang_code_specrtum = rang_codes_specrtum[satellite_num]
+	signal = signals[satellite_num]
+	
+	signal_with_noise = np.empty(len(signal))
+##-----------------------------------------------------------------------------
+
+	plot_builder = Builder(num_of_satellites = satellite_num,
+                           sampl_freq       = sampling_freq, 
+                           samples_per_code = samples_for_prosessing)
+
+##-----------------------------------------------------------------------------
 
 	for i in range(len(signal)):
 		signal_with_noise[i]  = signal[i] + random.gauss(0, sigma)
@@ -193,6 +224,13 @@ def acquisition(satellite_num, sigma):
 		correlation = abs(np.fft.ifft(rang_code_specrtum * IQ_signal_specrtum))**2
 
 		results[freq_index, :] = correlation
+##-----------------------------------------------------------------------------
+		plot_builder.add_to_plot(data           = results[freq_index, :], 
+                                 freq_deviation = (-dopp_freq_max + 
+					 								freq_index * dopp_freq_step))
+
+	plot_builder.show_plot()
+##-----------------------------------------------------------------------------
 
 	peak_size       = results.max(1).max()
 	frequency_index = results.max(1).argmax()
@@ -212,11 +250,10 @@ def acquisition(satellite_num, sigma):
 
 	elif exclude_Range_Index2 >= samples_for_prosessing - 1:
 		code_phase_range = np.r_[exclude_Range_Index2 - samples_for_prosessing : exclude_Range_Index1]
-
 	else:
 		code_phase_range = np.r_[0 : exclude_Range_Index1 + 1, exclude_Range_Index2 : samples_for_prosessing]
 
-	    # --- Find the second highest correlation peak in the same freq. bin ---
+	# --- Find the second highest correlation peak in the same freq. bin ---
 	limited_correlation = max_correlation[code_phase_range]
 
 	second_peak = limited_correlation.max()
@@ -230,76 +267,89 @@ def acquisition(satellite_num, sigma):
 					 							frequency_index * dopp_freq_step), 
 												correlation_ratio))
 
-# -----------------------------------------------------------------------------		
+# ##-----------------------------------------------------------------------------		
 
-		fig, (ax1, ax2, ax3, ax4) = plt.subplots(nrows = 4, ncols = 1)
-		plt.xlabel('Time')
-		plt.ylabel('Amplitude')
+		# fig, (ax1, ax2, ax3, ax4) = plt.subplots(nrows = 4, ncols = 1)
+		# plt.xlabel('Time')
+		# plt.ylabel('Amplitude')
 
-		ax1.plot(phase_points[:100], rang_code[:100])
-		ax2.plot(phase_points[:100], carrier[:100])
-		ax3.plot(phase_points[:100], signal_with_noise[:100])
-		ax4.plot(phase_points[:100], (signal_with_noise * carrier)[:100])
-		plt.show()
+# 		ax1.plot(phase_points[:100], rang_code[:100])
+# 		ax2.plot(phase_points[:100], carrier[:100])
+# 		ax3.plot(phase_points[:100], signal_with_noise[:100])
+# 		ax4.plot(phase_points[:100], (signal_with_noise * carrier)[:100])
+# 		plt.show()
 
-		fig, (ax1, ax2) = plt.subplots(nrows = 2, ncols = 1)
+# 		fig, (ax1, ax2) = plt.subplots(nrows = 2, ncols = 1)
 
-		ax1.plot(max_correlation)
-		ax2.plot(limited_correlation)
-		plt.show()
+# 		ax1.plot(max_correlation)
+# 		ax2.plot(limited_correlation)
+# 		plt.show()
 
-##-----------------------------------------------------------------------------		
+# ##-----------------------------------------------------------------------------		
 
 		return 1
-			
 	else:
 		return 0
+
+def acquisition_for_all_satellites():
+	pass
+
+
+def plot_prob_char(rang_codes, rang_codes_specrtum, carrier, signals, 
+					num_of_repetititons, sigma_step, sigma_max, satellite_num):
+
+	num_of_sigma = int(sigma_max / sigma_step)
+	print(num_of_sigma)
+
+
+	sigma = (np.arange(num_of_sigma) * sigma_step) ** 1
+	print(sigma)
+	print((np.arange(num_of_sigma) * sigma_step))
+	# E_div_dispersion_array = 1 / sigma_array**2
+
+
+	probabilities = np.zeros(num_of_sigma)
+	# print(probabilities)
+
+	for i in range(num_of_sigma):
+
+		result = 0
+
+		for j in range(num_of_repetititons):
+
+			result += acquisition(rang_codes, rang_codes_specrtum, carrier, signals,
+													satellite_num,  i * sigma_step)
+
+		error_probability = 1 - (result / num_of_repetititons)
+
+		probabilities[i]  = error_probability
+
+
+	plt.plot(sigma, probabilities)
+	plt.title('Probability characteristics')
+	plt.xlabel('Sigma')
+	plt.ylabel('P_error')
+	plt.grid()
+	plt.show()
+
 
 
 if __name__ == '__main__':
 
-	acquisition(1,  1)
+	rang_codes, rang_codes_specrtum, carrier, signals = signal_generator()
+
+	# plot_prob_char(rang_codes, rang_codes_specrtum, carrier, signals, 
+	# 	num_of_repetititons = 100, sigma_step = 1, sigma_max = 20, satellite_num = 1)
+
+	acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num = 1, sigma = 5)
 
 
 
-	# num_of_repetititons = 100
-	
-	# sigma_step   = 1
-	# sigma_max    = 20
-
-	# num_of_sigma = int(sigma_max / sigma_step)
-	# print(num_of_sigma)
 
 
-	# sigma = (np.arange(num_of_sigma) * sigma_step) ** 1
-	# print(sigma)
-	# print((np.arange(num_of_sigma) * sigma_step))
-	# # E_div_dispersion_array = 1 / sigma_array**2
-
-	# E = 1
-
-	# probabilities = np.zeros(num_of_sigma)
-	# # print(probabilities)
-
-	# for i in range(num_of_sigma):
-
-	# 	result = 0
-
-	# 	for j in range(num_of_repetititons):
-
-	# 		result += acquisition(1,  i * sigma_step)
-
-	# 	error_probability = 1 - (result / num_of_repetititons)
-
-	# 	probabilities[i]  = error_probability
 
 
-	# plt.plot(sigma, probabilities)
-	# plt.title('Probability characteristics')
-	# plt.xlabel('Sigma')
-	# plt.ylabel('P_error')
-	# plt.grid()
-	# plt.show()
+
 
 
 
