@@ -35,7 +35,7 @@ sampling_freq  = 10e6 ## Hz
 ##---------------------------simulation parameters-----------------------------
 
 ms_to_process        = 1
-samples_to_shift     = 4000
+samples_to_shift     = 1000
 skip_number_of_bytes = 4660
 dopp_freq_max        = int(5e3) ## Hz
 dopp_freq_step       = int(500) ## Hz
@@ -89,9 +89,7 @@ samples_per_Rang_code_chip = int(round(sampling_freq / Rang_code_freq))
 samples_per_Rang_code = np.longlong(round(Rang_code_length * 
 									sampling_freq / Rang_code_freq)) ## num of samples per one 
 																	 ## Ranging code chip
-# samples_for_prosessing = int(samples_per_ms * ms_to_process)
-
-samples_for_prosessing = int(samples_per_Rang_code)
+samples_for_prosessing = int(round(samples_per_ms * ms_to_process))
 
 phase_points           = np.arange(samples_for_prosessing) * time_of_sample
 Ranging_code_period    = Rang_code_length / Rang_code_freq
@@ -99,9 +97,11 @@ Ranging_code_index     = np.longlong((np.floor(np.arange(0, samples_for_prosessi
 									Rang_code_freq / sampling_freq))) ## number of whole Rang_code_chips
 																		      ## per one sample
 
-print(Ranging_code_index)															      
+print(Ranging_code_index)
+print(len(Ranging_code_index))															      
 Ranging_code_index = Ranging_code_index % Rang_code_length	
-print(Ranging_code_index)															      
+print(Ranging_code_index)
+print(Ranging_code_index[int(samples_for_prosessing/2)-5 : int(samples_for_prosessing/2)+5])															      
 
 
 number_of_frq_bins = np.int(np.floor(2 * dopp_freq_max / dopp_freq_step) + 1)
@@ -203,9 +203,10 @@ def acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num
 	signal_with_noise = np.empty(len(signal))
 ##-----------------------------------------------------------------------------
 
-	plot_builder = Builder(num_of_satellites = satellite_num,
-                           sampl_freq       = sampling_freq, 
-                           samples_per_code = samples_for_prosessing)
+	# plot_builder = Builder(num_of_satellites = satellite_num,
+ #                           sampl_freq       = sampling_freq, 
+ #                           samples_per_code = samples_for_prosessing,
+ #                           sigma = sigma)
 
 ##-----------------------------------------------------------------------------
 
@@ -225,11 +226,11 @@ def acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num
 
 		results[freq_index, :] = correlation
 ##-----------------------------------------------------------------------------
-		plot_builder.add_to_plot(data           = results[freq_index, :], 
-                                 freq_deviation = (-dopp_freq_max + 
-					 								freq_index * dopp_freq_step))
+		# plot_builder.add_to_plot(data           = results[freq_index, :], 
+  #                                freq_deviation = (-dopp_freq_max + 
+		# 			 								freq_index * dopp_freq_step))
 
-	plot_builder.show_plot()
+	# plot_builder.show_plot()
 ##-----------------------------------------------------------------------------
 
 	peak_size       = results.max(1).max()
@@ -262,10 +263,10 @@ def acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num
 
 	if (correlation_ratio) > threashold:
 
-		print('the signal is detected')
-		print('%.d\t%.d\t%.f' %(satellite_num, (- dopp_freq_max + 
-					 							frequency_index * dopp_freq_step), 
-												correlation_ratio))
+		# print('The signal is detected')
+		# print('%.d\t%.d\t%.f' %(satellite_num, (- dopp_freq_max + 
+		# 			 							frequency_index * dopp_freq_step), 
+		# 										correlation_ratio))
 
 # ##-----------------------------------------------------------------------------		
 
@@ -273,17 +274,17 @@ def acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num
 		# plt.xlabel('Time')
 		# plt.ylabel('Amplitude')
 
-# 		ax1.plot(phase_points[:100], rang_code[:100])
-# 		ax2.plot(phase_points[:100], carrier[:100])
-# 		ax3.plot(phase_points[:100], signal_with_noise[:100])
-# 		ax4.plot(phase_points[:100], (signal_with_noise * carrier)[:100])
-# 		plt.show()
+		# ax1.plot(phase_points, rang_code)
+		# ax2.plot(phase_points, carrier)
+		# ax3.plot(phase_points, signal_with_noise)
+		# ax4.plot(phase_points, (signal_with_noise * carrier))
+		# plt.show()
 
-# 		fig, (ax1, ax2) = plt.subplots(nrows = 2, ncols = 1)
+		# fig, (ax1, ax2) = plt.subplots(nrows = 2, ncols = 1)
 
-# 		ax1.plot(max_correlation)
-# 		ax2.plot(limited_correlation)
-# 		plt.show()
+		# ax1.plot(max_correlation)
+		# ax2.plot(limited_correlation)
+		# plt.show()
 
 # ##-----------------------------------------------------------------------------		
 
@@ -338,10 +339,15 @@ if __name__ == '__main__':
 
 	rang_codes, rang_codes_specrtum, carrier, signals = signal_generator()
 
-	# plot_prob_char(rang_codes, rang_codes_specrtum, carrier, signals, 
-	# 	num_of_repetititons = 100, sigma_step = 1, sigma_max = 20, satellite_num = 1)
+	plot_prob_char(rang_codes, rang_codes_specrtum, carrier, signals, 
+		num_of_repetititons = 20, sigma_step = 1, sigma_max = 20, satellite_num = 1)
 
-	acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num = 1, sigma = 5)
+	# acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num = 1, sigma = 0)
+
+
+
+
+
 
 
 
