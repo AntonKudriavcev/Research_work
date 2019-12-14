@@ -18,6 +18,7 @@ import numpy as np
 import random
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import time
 
 from graph_builder import Builder
 
@@ -39,7 +40,7 @@ samples_to_shift     = 1000
 skip_number_of_bytes = 4660
 dopp_freq_max        = int(5e3) ## Hz
 dopp_freq_step       = int(500) ## Hz
-threashold           = 2.5
+# threashold           = 2.0
 num_of_satellites    = 37
 
 error                = 0
@@ -96,14 +97,9 @@ Ranging_code_period    = Rang_code_length / Rang_code_freq
 Ranging_code_index     = np.longlong((np.floor(np.arange(0, samples_for_prosessing) * 
 									Rang_code_freq / sampling_freq))) ## number of whole Rang_code_chips
 																		      ## per one sample
-
-print(Ranging_code_index)
-print(len(Ranging_code_index))															      
+															      
 Ranging_code_index = Ranging_code_index % Rang_code_length	
-print(Ranging_code_index)
-print(Ranging_code_index[int(samples_for_prosessing/2)-5 : int(samples_for_prosessing/2)+5])															      
-
-
+															      
 number_of_frq_bins = np.int(np.floor(2 * dopp_freq_max / dopp_freq_step) + 1)
 
 results = np.zeros((number_of_frq_bins, samples_for_prosessing))
@@ -194,7 +190,7 @@ def signal_generator():
 
 
 
-def acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num, sigma):
+def acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num, sigma, amplitude, Threashold):
 
 	rang_code = rang_codes[satellite_num]
 	rang_code_specrtum = rang_codes_specrtum[satellite_num]
@@ -211,7 +207,7 @@ def acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num
 ##-----------------------------------------------------------------------------
 
 	for i in range(len(signal)):
-		signal_with_noise[i]  = signal[i] + random.gauss(0, sigma)
+		signal_with_noise[i]  = amplitude * signal[i] + random.gauss(0, sigma)
 
 	for freq_index in range(number_of_frq_bins):
 
@@ -247,7 +243,7 @@ def acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num
 
 	# boundaries
 	if exclude_Range_Index1 <= 0:
-		code_phase_range = np.r_[exclude_Range_Index2 : samples_for_prosessing + exclude_Range_Index1 + 1]
+		code_phase_range = np.r_[exclude_Range_Index2 : samples_for_prosessing + exclude_Range_Index1]
 
 	elif exclude_Range_Index2 >= samples_for_prosessing - 1:
 		code_phase_range = np.r_[exclude_Range_Index2 - samples_for_prosessing : exclude_Range_Index1]
@@ -255,13 +251,14 @@ def acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num
 		code_phase_range = np.r_[0 : exclude_Range_Index1 + 1, exclude_Range_Index2 : samples_for_prosessing]
 
 	# --- Find the second highest correlation peak in the same freq. bin ---
+
 	limited_correlation = max_correlation[code_phase_range]
 
 	second_peak = limited_correlation.max()
 
 	correlation_ratio = peak_size / second_peak
 
-	if (correlation_ratio) > threashold:
+	if (correlation_ratio) > Threashold:
 
 		# print('The signal is detected')
 		# print('%.d\t%.d\t%.f' %(satellite_num, (- dopp_freq_max + 
@@ -295,54 +292,181 @@ def acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num
 def acquisition_for_all_satellites():
 	pass
 
+def plot_prob_acqu_char(rang_codes, rang_codes_specrtum, carrier, signals, sigma,  
+						num_of_repetititons, A_step, A_min, A_max, satellite_num, Threashold):
 
-def plot_prob_char(rang_codes, rang_codes_specrtum, carrier, signals, 
-					num_of_repetititons, sigma_step, sigma_max, satellite_num):
+	amplitude = (np.arange(A_min, A_max + A_step, A_step))
+	print(amplitude)
 
-	num_of_sigma = int(sigma_max / sigma_step)
-	print(num_of_sigma)
+	Power = (amplitude**2) / 2
+	E_div_N0_array = (sampling_freq / 1) * (Power) / (sigma**2)
 
+	print(E_div_N0_array)
 
-	sigma = (np.arange(num_of_sigma) * sigma_step) ** 1
-	print(sigma)
-	print((np.arange(num_of_sigma) * sigma_step))
-	# E_div_dispersion_array = 1 / sigma_array**2
+	probabilities = np.zeros(len(amplitude))
+	print(probabilities)
 
-
-	probabilities = np.zeros(num_of_sigma)
-	# print(probabilities)
-
-	for i in range(num_of_sigma):
+	for i in range(len(amplitude)):
 
 		result = 0
 
 		for j in range(num_of_repetititons):
 
 			result += acquisition(rang_codes, rang_codes_specrtum, carrier, signals,
-													satellite_num,  i * sigma_step)
+													satellite_num,  sigma, amplitude[i], Threashold)
 
-		error_probability = 1 - (result / num_of_repetititons)
+		acqu_probability = (result / num_of_repetititons)
 
-		probabilities[i]  = error_probability
+		probabilities[i]  = acqu_probability
 
-
-	plt.plot(sigma, probabilities)
-	plt.title('Probability characteristics')
-	plt.xlabel('Sigma')
-	plt.ylabel('P_error')
+	plt.plot((10 * np.log10(E_div_N0_array)), probabilities)
+	plt.title('Probability characteristics, treashold = %.2f' %Threashold)
+	plt.xlabel('P/N0, dB*Hz')
+	plt.ylabel('P_acquision')
 	plt.grid()
 	plt.show()
 
+def plot_prob_acqu_char_dB(rang_codes, rang_codes_specrtum, carrier, signals, sigma,
+							snrDb_min, snrDb_max, snrDb_step, 
+							num_of_repetititons, satellite_num, Threashold):
+
+	snrDb = np.arange(snrDb_min, snrDb_max, snrDb_step)
+
+	snr        = 10**(0.1*snrDb)              # Отношение сигнал-шум в разах
+	var        = sigma**2                     # Дисперсия шума в одной квадратуре
+	amplitude = np.sqrt(2*snr*var/sampling_freq)        # Амплитуда сигнала
+
+	probabilities = np.zeros(len(snrDb))
+
+	for i in range(len(snrDb)):
+
+		result = 0
+
+		for j in range(num_of_repetititons):
+
+			result += acquisition(rang_codes, rang_codes_specrtum, carrier, 
+									signals, satellite_num, sigma, amplitude[i], Threashold)
+
+		acqu_probability = (result / num_of_repetititons)
+
+		probabilities[i]  = acqu_probability
+
+	print(time_start - time.time())
 
 
+	plt.plot(snrDb, probabilities)
+	plt.title('Probability characteristics, treashold = %.2f' %Threashold)
+	plt.xlabel('P/N0, dB*Hz')
+	plt.ylabel('P_acquision')
+	plt.grid()
+	# plt.show()
+
+	plt.savefig(fname = ('Acquisition characteristics(step = %.1f, snrDb_min = %.1f, snrDb_max = %.1f , repetition = %.1f, threashold = %.1f).jpg'
+							%(snrDb_step, snrDb_min, snrDb_max, num_of_repetititons, Threashold)))
+	plt.clf()
+
+def plot_prob_false_char(rang_codes, rang_codes_specrtum, carrier, signals,  
+						num_of_repetititons, sigma_step, sigma_min, sigma_max, satellite_num, Threashold):
+
+
+	sigma = np.arange(sigma_min, sigma_max + sigma_step, sigma_step, dtype = np.float64)
+	print(sigma)
+
+	Dispersion = sigma**2
+	print(Dispersion)
+
+	one_div_N0_array = (sampling_freq / 1) / Dispersion
+	print(one_div_N0_array)
+
+
+	probabilities = np.zeros(len(sigma))
+	print(probabilities)
+
+	for i in range(len(sigma)):
+
+		result = 0
+
+		for j in range(num_of_repetititons):
+
+			result += acquisition(rang_codes, rang_codes_specrtum, carrier, signals,
+													satellite_num,  sigma[i], 0, Threashold)
+
+		error_probability = (result / num_of_repetititons)
+
+		probabilities[i]  = error_probability
+
+	plt.plot((10 * np.log10(one_div_N0_array)[::-1]), probabilities[::-1])
+	plt.title('Probability characteristics, treashold = %.2f' %Threashold)
+	plt.xlabel('1/N0, dB*Hz')
+	plt.ylabel('P_error')
+	plt.grid()
+	plt.savefig(fname = ('False characteristics(step = %.1f, sigma_min = %.1f, sigma_max = %.1f , repetition = %.1f, threashold = %.1f).jpg'
+							%(sigma_step, sigma_min, sigma_max, num_of_repetititons, Threashold)))
+	plt.clf()
+	
 if __name__ == '__main__':
 
 	rang_codes, rang_codes_specrtum, carrier, signals = signal_generator()
 
-	plot_prob_char(rang_codes, rang_codes_specrtum, carrier, signals, 
-		num_of_repetititons = 20, sigma_step = 1, sigma_max = 20, satellite_num = 1)
+##--Probability acquisition----------------------------------------------------
+	# time_start = time.time()
 
-	# acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num = 1, sigma = 0)
+	# plot_prob_acqu_char_dB(rang_codes, rang_codes_specrtum, carrier, signals, sigma = 1,
+	# 						snrDb_min = 25, snrDb_max = 55, snrDb_step = 0.5, 
+	# 						num_of_repetititons = 130, satellite_num = 1, Threashold = 1.8)
+
+	# plot_prob_acqu_char_dB(rang_codes, rang_codes_specrtum, carrier, signals, sigma = 1,
+	# 						snrDb_min = 25, snrDb_max = 55, snrDb_step = 0.5, 
+	# 						num_of_repetititons = 130, satellite_num = 1, Threashold = 2.0)
+
+	# plot_prob_acqu_char_dB(rang_codes, rang_codes_specrtum, carrier, signals, sigma = 1,
+	# 						snrDb_min = 25, snrDb_max = 55, snrDb_step = 0.5, 
+	# 						num_of_repetititons = 130, satellite_num = 1, Threashold = 2.2)
+
+	# plot_prob_acqu_char_dB(rang_codes, rang_codes_specrtum, carrier, signals, sigma = 1,
+	# 						snrDb_min = 25, snrDb_max = 55, snrDb_step = 0.5, 
+	# 						num_of_repetititons = 130, satellite_num = 1, Threashold = 2.5)
+
+	# plot_prob_acqu_char_dB(rang_codes, rang_codes_specrtum, carrier, signals, sigma = 1,
+	# 						snrDb_min = 25, snrDb_max = 55, snrDb_step = 0.5, 
+	# 						num_of_repetititons = 130, satellite_num = 1, Threashold = 3.0)
+
+
+	# plot_prob_acqu_char(rang_codes, rang_codes_specrtum, carrier, signals, sigma = 1, 
+	# 	num_of_repetititons = 130, A_step = 0.009, A_min = 0.005, A_max = 0.2, satellite_num = 1, Threashold = 1.8)
+
+	# plot_prob_acqu_char(rang_codes, rang_codes_specrtum, carrier, signals, sigma = 1, 
+	# 	num_of_repetititons = 130, A_step = 0.009, A_min = 0.005, A_max = 0.2, satellite_num = 1, Threashold = 2.0)
+
+	# plot_prob_acqu_char(rang_codes, rang_codes_specrtum, carrier, signals, sigma = 1, 
+	# 	num_of_repetititons = 130, A_step = 0.009, A_min = 0.005, A_max = 0.2, satellite_num = 1, Threashold = 2.2)
+
+	# plot_prob_acqu_char(rang_codes, rang_codes_specrtum, carrier, signals, sigma = 1, 
+	# 	num_of_repetititons = 40, A_step = 0.009, A_min = 0.005, A_max = 0.2, satellite_num = 1, Threashold = 2.5)
+
+	# plot_prob_acqu_char(rang_codes, rang_codes_specrtum, carrier, signals, sigma = 1, 
+	# 	num_of_repetititons = 130, A_step = 0.009, A_min = 0.005, A_max = 0.2, satellite_num = 1, Threashold = 3.0)
+
+##--Probability false----------------------------------------------------------
+
+	plot_prob_false_char(rang_codes, rang_codes_specrtum, carrier, signals, 
+		num_of_repetititons = 1000, sigma_step = 10, sigma_min = 5, sigma_max = 250, satellite_num = 1, Threashold = 1.8)
+
+	plot_prob_false_char(rang_codes, rang_codes_specrtum, carrier, signals, 
+		num_of_repetititons = 1000, sigma_step = 10, sigma_min = 5, sigma_max = 250, satellite_num = 1, Threashold = 2.0)
+
+	plot_prob_false_char(rang_codes, rang_codes_specrtum, carrier, signals, 
+		num_of_repetititons = 1000, sigma_step = 10, sigma_min = 5, sigma_max = 250, satellite_num = 1, Threashold = 2.2)
+
+	plot_prob_false_char(rang_codes, rang_codes_specrtum, carrier, signals, 
+		num_of_repetititons = 1000, sigma_step = 10, sigma_min = 5, sigma_max = 250, satellite_num = 1, Threashold = 2.5)
+
+	plot_prob_false_char(rang_codes, rang_codes_specrtum, carrier, signals, 
+		num_of_repetititons = 1000, sigma_step = 10, sigma_min = 5, sigma_max = 250, satellite_num = 1, Threashold = 3.0)
+
+##--acquisition----------------------------------------------------------------
+
+	# acquisition(rang_codes, rang_codes_specrtum, carrier, signals, satellite_num = 1, sigma = 1, amplitude = 1, Threashold = 2.5)
 
 
 
